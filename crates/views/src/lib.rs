@@ -21,3 +21,4 @@ use screens::song::SongView;
 use screens::user::UserView;
 use shared::adaptive::Adaptive;
 use shells::fullscreen::FullscreenView;
+pub use shells::pip::PipView;

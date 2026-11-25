@@ -3,8 +3,8 @@ use i18n::t;
 use input::{
     CloseWindow, DecreaseFontSize, Hide, HideOthers, IncreaseFontSize, MinimizeWindow,
     OpenSettings, Quit, Redo, Refresh, ResetFontSize, SeekBack, SeekForward, ShowAll, SignOut,
-    SongNext, SongPrevious, TogglePlayback, ToggleRepeat, ToggleShuffle, Undo, VolumeDown,
-    VolumeUp, ZoomWindow,
+    SongNext, SongPrevious, TogglePip, TogglePlayback, ToggleRepeat, ToggleShuffle, Undo,
+    VolumeDown, VolumeUp, ZoomWindow,
 };
 use router::Destination;
 use state::{AppSettings, Equalizer, Shelf, Sonora};
@@ -24,7 +24,7 @@ impl Global for HidingToTray {}
 /// since the tray it was hidden from brings it back.
 #[cfg(target_os = "linux")]
 pub fn hide_to_tray(cx: &mut App) {
-    let Some(window) = cx.windows().first().copied() else {
+    let Some(window) = crate::main_window(cx) else {
         return;
     };
     cx.set_global(HidingToTray);
@@ -42,6 +42,11 @@ pub fn register(lingers: bool, cx: &mut App) {
     cx.on_action(|_: &ShowAll, cx: &mut App| cx.unhide_other_apps());
 
     cx.on_window_closed(move |cx, _| {
+        // The picture-in-picture window goes with the main one, so it never keeps the app out of
+        // the tray.
+        if crate::main_window(cx).is_none() {
+            crate::pip::close(cx);
+        }
         if !cx.windows().is_empty() {
             return;
         }
@@ -90,6 +95,8 @@ pub fn register(lingers: bool, cx: &mut App) {
         let playback = Sonora::global(cx).playback.clone();
         playback.update(cx, |playback, cx| playback.toggle_play(cx));
     });
+
+    cx.on_action(|_: &TogglePip, cx: &mut App| crate::pip::toggle(cx));
 
     cx.on_action(|_: &SongPrevious, cx: &mut App| {
         let playback = Sonora::global(cx).playback.clone();

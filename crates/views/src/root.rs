@@ -1,6 +1,6 @@
 use gpui::{AnyView, Context, Entity, MouseButton, NavigationDirection, Render, Task};
 use gpui::{App, Font, FontFallbacks, SharedString, StyleRefinement, font, prelude::*};
-use gpui::{Pixels, Window, deferred, div};
+use gpui::{Div, Pixels, Window, deferred, div};
 use input::{
     CloseWindow, MinimizeWindow, NavigateBack, NavigateForward, OpenFilter, OpenSearch,
     OpenSettings, Refresh, ShowMembers, ToggleFullscreen, ToggleLyrics, TogglePowerbar,
@@ -1117,7 +1117,37 @@ const SCRIPTS: [&str; 18] = [
     "Segoe UI Emoji",
 ];
 
-fn ui_font(chosen: &str) -> Font {
+/// Lets the middle scroll button work anywhere in a window's root, which has to hear the pointer
+/// wherever it goes while the scroll lasts.
+pub(crate) fn middle_scrolled(root: Div) -> Div {
+    root.capture_any_mouse_down(|_, window, cx| {
+        if ui::cancel_middle_scroll(cx) {
+            window.refresh();
+            cx.stop_propagation();
+        }
+    })
+    .capture_any_mouse_up(|event, window, cx| {
+        if event.button == MouseButton::Middle && ui::release_middle_scroll(event.position, cx) {
+            window.refresh();
+        }
+    })
+    .on_mouse_up_out(MouseButton::Middle, |event, window, cx| {
+        if ui::release_middle_scroll(event.position, cx) {
+            window.refresh();
+        }
+    })
+    .capture_key_down(|event, window, cx| {
+        if event.keystroke.key == "escape" && ui::cancel_middle_scroll(cx) {
+            window.refresh();
+            cx.stop_propagation();
+        }
+    })
+    .on_mouse_move(|event, window, cx| {
+        ui::update_middle_scroll(event.position, window, cx);
+    })
+}
+
+pub(crate) fn ui_font(chosen: &str) -> Font {
     match chosen == SYSTEM_FONT {
         true => Font {
             fallbacks: Some(scripts(false).clone()),
@@ -1480,33 +1510,7 @@ impl Render for Root {
             })
             .when(!ambient && !opening, |this| this.bg(theme.background))
             .text_color(theme.foreground)
-            .capture_any_mouse_down(|_, window, cx| {
-                if ui::cancel_middle_scroll(cx) {
-                    window.refresh();
-                    cx.stop_propagation();
-                }
-            })
-            .capture_any_mouse_up(|event, window, cx| {
-                if event.button == MouseButton::Middle
-                    && ui::release_middle_scroll(event.position, cx)
-                {
-                    window.refresh();
-                }
-            })
-            .on_mouse_up_out(MouseButton::Middle, |event, window, cx| {
-                if ui::release_middle_scroll(event.position, cx) {
-                    window.refresh();
-                }
-            })
-            .capture_key_down(|event, window, cx| {
-                if event.keystroke.key == "escape" && ui::cancel_middle_scroll(cx) {
-                    window.refresh();
-                    cx.stop_propagation();
-                }
-            })
-            .on_mouse_move(|event, window, cx| {
-                ui::update_middle_scroll(event.position, window, cx);
-            })
+            .map(middle_scrolled)
             .on_mouse_down(
                 MouseButton::Navigate(NavigationDirection::Back),
                 |_, _, cx| back(cx),

@@ -54,6 +54,7 @@ keybind-open-filter = Saring halaman
 keybind-open-settings = Buka pengaturan
 keybind-refresh = Segarkan
 keybind-toggle-fullscreen = Sedang diputar
+keybind-toggle-pip = Gambar-dalam-gambar
 keybind-toggle-queue = Tampilkan antrian
 keybind-toggle-lyrics = Tampilkan lirik
 keybind-toggle-window-fullscreen = Jendela layar penuh

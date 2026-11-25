@@ -13,7 +13,8 @@ use gpui::{
 use gpui::{Div, Window, anchored, canvas, deferred, div, phi, point, px, rems};
 use i18n::t;
 use input::{
-    ToggleFullscreen, ToggleLyrics, ToggleQueue, ToggleWindowFullscreen, WORKSPACE_CONTEXT,
+    ToggleFullscreen, ToggleLyrics, TogglePip, ToggleQueue, ToggleWindowFullscreen,
+    WORKSPACE_CONTEXT,
 };
 use router::{Destination, navigate};
 use state::{AppSettings, Cover, FullscreenControlsAutohide, Playback, Queue, SideTab, Sonora};
@@ -185,6 +186,8 @@ pub struct FullscreenView {
     /// The Sessions picker below `Room::Wide`, where the player bar has its own.
     sessions: Entity<SessionsButton>,
     over_volume: Option<f32>,
+    /// Whether the player fills the picture-in-picture window rather than the main one.
+    pip: bool,
 }
 
 impl VolumeHost for FullscreenView {
@@ -281,6 +284,22 @@ impl FullscreenView {
             volume_bar: ScrubberState::new("fullscreen-volume"),
             sessions: cx.new(SessionsButton::new),
             over_volume: None,
+            pip: false,
+        }
+    }
+
+    /// Draws the player for the picture-in-picture window, whose corner closes that window and
+    /// which takes no part in the main window moving between its shells.
+    pub(crate) fn pip(mut self) -> Self {
+        self.pip = true;
+        self
+    }
+
+    /// Where the window's move between its shells stands.
+    fn swap(&self, cx: &App) -> ShellSwap {
+        match self.pip {
+            true => ShellSwap::Settled,
+            false => cx.try_global::<ShellSwap>().copied().unwrap_or_default(),
         }
     }
 
@@ -361,8 +380,11 @@ impl FullscreenView {
                 }
                 this.flip(false);
                 // The pointer going idle takes the cursor with it; any motion
-                // brings it back on its own.
-                cx.hide_cursor();
+                // brings it back on its own. One outside may rest on another of the
+                // app's windows, which keeps its cursor.
+                if this.inside {
+                    cx.hide_cursor();
+                }
                 cx.notify();
             })
             .ok();
@@ -462,7 +484,7 @@ impl FullscreenView {
     /// The player moving between the shells wins over a switch still running, so the two bars
     /// never part.
     fn cover_room(&self, hidden: f32, cx: &App) -> f32 {
-        if cx.try_global::<ShellSwap>().copied().unwrap_or_default() != ShellSwap::Settled {
+        if self.swap(cx) != ShellSwap::Settled {
             return PlayerBar::cover_room(cx);
         }
         match self.panel {
@@ -616,7 +638,7 @@ impl FullscreenView {
         // As the player opens, its cover comes into view with the rest of it while it flies. Below
         // `Room::Wide` it is the bar's own cover rising whole out of the bar beside controls that
         // stay put.
-        let fade = match narrow {
+        let fade = match narrow || self.pip {
             true => 1.,
             false => cx.try_global::<CoverFade>().map_or(1., |fade| fade.0),
         };
@@ -733,8 +755,7 @@ impl FullscreenView {
         // `truncate`, whose `overflow_hidden` would clip the shadow to the line box. Every shadow
         // is a blur layer of its own, so they wait out the player opening or closing, while the
         // meta is still fading and every frame already carries the most layers.
-        let shadowed = shared::effects()
-            && cx.try_global::<ShellSwap>().copied().unwrap_or_default() == ShellSwap::Settled;
+        let shadowed = shared::effects() && self.swap(cx) == ShellSwap::Settled;
         let shadow = TEXT_SHADOW.map(|blur| {
             TextShadow::new(theme.background.opacity(TEXT_SHADOW_STRENGTH)).blur(px(blur))
         });
@@ -1006,7 +1027,11 @@ impl FullscreenView {
                 .into_any_element(),
             seek: dozing(self.seek(cx), hide).into_any_element(),
             tools: Some(
-                dozing(PlayerBar::tools_like(self.sessions.clone(), cx), hide).into_any_element(),
+                dozing(
+                    PlayerBar::tools_like(self.sessions.clone(), !self.pip, cx),
+                    hide,
+                )
+                .into_any_element(),
             ),
             sound: sound.into_any_element(),
             corner: div()
@@ -1355,10 +1380,24 @@ impl FullscreenView {
             .ghost()
             .when(frosted, Button::frosted)
             .small()
-            .icon("icons/minimize.svg")
-            .tooltip_above("player-fullscreen-leave")
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleFullscreen), cx));
-        let leave = match cx.try_global::<ShellSwap>().copied().unwrap_or_default() {
+            .when_else(
+                self.pip,
+                |this| {
+                    this.icon("icons/picture-in-picture.svg")
+                        .tooltip_above("player-pip-close")
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(TogglePip), cx);
+                        })
+                },
+                |this| {
+                    this.icon("icons/minimize.svg")
+                        .tooltip_above("player-fullscreen-leave")
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(ToggleFullscreen), cx);
+                        })
+                },
+            );
+        let leave = match self.swap(cx) {
             ShellSwap::Opening => deferred(leave).into_any_element(),
             ShellSwap::Closing => leave.invisible().into_any_element(),
             ShellSwap::Settled => leave.into_any_element(),
@@ -1413,7 +1452,15 @@ impl FullscreenView {
                         .relative()
                         .top(px(SINK) * hide)
                         .opacity(1. - hide)
-                        .child(self.pill(cx)),
+                        .flex()
+                        .items_center()
+                        .gap(px(CORNER_GAP))
+                        .child(self.pill(cx))
+                        .when(!self.pip, |this| {
+                            this.child(
+                                PlayerBar::pip_button().when(ambient::shown(cx), Button::frosted),
+                            )
+                        }),
                 )
             })
             .child(self.leave(idle, ambient::shown(cx), false, cx))

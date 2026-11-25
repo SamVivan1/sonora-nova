@@ -12,6 +12,7 @@ mod gestures;
 mod http;
 mod logging;
 mod memory;
+mod pip;
 mod single;
 #[cfg(windows)]
 mod thumbbar;
@@ -29,7 +30,7 @@ use std::time::Duration;
 use cli::commands::CommandType;
 use gpui::{
     App, AppContext as _, Bounds, Pixels, QuitMode, Size, TitlebarOptions, WindowBounds,
-    WindowOptions, px, size,
+    WindowHandle, WindowOptions, px, size,
 };
 use music::LyricsProvider;
 use music::link::Linked;
@@ -312,8 +313,15 @@ fn destination(linked: &Linked) -> Option<Destination> {
     }
 }
 
+/// The window the app lives in. A picture-in-picture window beside it never counts.
+fn main_window(cx: &App) -> Option<WindowHandle<Root>> {
+    cx.windows()
+        .into_iter()
+        .find_map(|window| window.downcast::<Root>())
+}
+
 fn show_window(cx: &mut App) {
-    match cx.windows().first() {
+    match main_window(cx) {
         Some(window) => {
             window
                 .update(cx, |_, window, _| window.activate_window())
@@ -336,9 +344,7 @@ enum WindowAction {
 
 /// Shows the window when it is hidden, minimized or closed, and hides it when it is visible.
 fn toggle_window(cx: &mut App) {
-    let visible = cx
-        .windows()
-        .first()
+    let visible = main_window(cx)
         .and_then(|window| window.update(cx, |_, window, _| window.is_visible()).ok());
     match window_action(visible) {
         WindowAction::Show => reveal_window(visible, cx),
@@ -363,7 +369,7 @@ fn hide_window(cx: &mut App) {
 
 #[cfg(not(target_os = "linux"))]
 fn hide_window(cx: &mut App) {
-    if let Some(window) = cx.windows().first() {
+    if let Some(window) = main_window(cx) {
         window
             .update(cx, |_, window, _| window.minimize_window())
             .ok();

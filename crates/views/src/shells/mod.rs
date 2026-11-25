@@ -1,4 +1,5 @@
 pub(crate) mod fullscreen;
+pub(crate) mod pip;
 pub(crate) mod workspace;
 
 use gpui::{AnyView, App, KeyContext};

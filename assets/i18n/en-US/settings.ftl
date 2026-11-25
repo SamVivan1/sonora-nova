@@ -55,6 +55,7 @@ keybind-open-filter = Filter the page
 keybind-open-settings = Open settings
 keybind-refresh = Refresh
 keybind-toggle-fullscreen = Now playing
+keybind-toggle-pip = Picture-in-picture
 keybind-toggle-queue = Show the queue
 keybind-toggle-lyrics = Show lyrics
 keybind-toggle-window-fullscreen = Full screen window

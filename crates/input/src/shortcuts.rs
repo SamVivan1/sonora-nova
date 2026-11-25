@@ -10,9 +10,9 @@ use ui::{FORM_CONTEXT, INPUT_CONTEXT, MENU_CONTEXT, TABLE_CONTEXT};
 use crate::{
     DecreaseFontSize, IncreaseFontSize, NavigateBack, NavigateForward, OpenFilter, OpenSearch,
     OpenSettings, POWERBAR_CONTEXT, Refresh, ResetFontSize, SEARCH_CONTEXT, SeekBack, SeekForward,
-    SongNext, SongPrevious, ToggleFullscreen, ToggleLyrics, TogglePlayback, TogglePowerbar,
-    ToggleQueue, ToggleRepeat, ToggleShuffle, ToggleWindowFullscreen, VolumeDown, VolumeUp,
-    WORKSPACE_CONTEXT,
+    SongNext, SongPrevious, ToggleFullscreen, ToggleLyrics, TogglePip, TogglePlayback,
+    TogglePowerbar, ToggleQueue, ToggleRepeat, ToggleShuffle, ToggleWindowFullscreen, VolumeDown,
+    VolumeUp, WORKSPACE_CONTEXT,
 };
 
 /// The modifiers that make a keystroke a command rather than typing. A key pressed without any
@@ -268,6 +268,15 @@ const SHORTCUTS: &[Shortcut] = &[
         scope: Scope::AwayFromText,
         bind: bind::<ToggleFullscreen>,
         defaults: &["f"],
+        mac: &[],
+    },
+    Shortcut {
+        id: "toggle-pip",
+        key: "keybind-toggle-pip",
+        section: Section::View,
+        scope: Scope::AwayFromText,
+        bind: bind::<TogglePip>,
+        defaults: &["p"],
         mac: &[],
     },
     Shortcut {

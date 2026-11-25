@@ -11,7 +11,7 @@ use gpui::{
 };
 use gpui::{Div, Window, deferred, div, px, rems};
 use i18n::t;
-use input::{ShowMembers, ToggleFullscreen, ToggleLyrics, ToggleQueue};
+use input::{ShowMembers, ToggleFullscreen, ToggleLyrics, TogglePip, ToggleQueue};
 use state::{AppSettings, Playback, PlayerBarLayout, Queue, SideTab, Sonora};
 use ui::{Artwork, Button, Flight, Pinnable, Popup, Room, Scrollbar, ScrubberState, Sprung};
 
@@ -326,6 +326,16 @@ impl PlayerBar {
         }
     }
 
+    /// The button that opens and closes the picture-in-picture window.
+    pub(crate) fn pip_button() -> Button {
+        Button::new("toggle-pip")
+            .ghost()
+            .small()
+            .icon("icons/picture-in-picture.svg")
+            .tooltip_above("player-pip")
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(TogglePip), cx))
+    }
+
     fn now_playing(&self, room: bool, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = match self.playback.read(cx).shown_track(cx) {
             Some(track) => match members::picked_by(cx) {
@@ -568,10 +578,11 @@ impl PlayerBar {
         ui::snapped(height, window)
     }
 
-    /// How many icon buttons stand before the volume: the sessions picker while it shows and
-    /// the panel buttons while the window has room for the right panel.
+    /// How many icon buttons stand before the volume: the sessions picker while it shows, the
+    /// panel buttons while the window has room for the right panel, and the picture-in-picture
+    /// button.
     fn tool_count(window: &Window, cx: &App) -> usize {
-        usize::from(Self::picker_shown(cx)) + Self::panel_buttons(window, cx)
+        usize::from(Self::picker_shown(cx)) + Self::panel_buttons(window, cx) + 1
     }
 
     /// Whether the bar shows its Sessions picker.
@@ -590,16 +601,19 @@ impl PlayerBar {
     }
 
     /// The tools for a view below `Room::Wide` that copies the bar's layout: `sessions` where the
-    /// bar shows its picker. The bar has no panel buttons there, and its tools take their place
-    /// in the row even when they draw nothing, so the copy's do too and its seek bar ends where
-    /// the bar's does.
-    pub(crate) fn tools_like(sessions: Entity<SessionsButton>, cx: &App) -> Div {
+    /// bar shows its picker, and the picture-in-picture button with `pip`. The bar has no panel
+    /// buttons there, and its tools take their place in the row even when they draw nothing, so
+    /// the copy's do too and its seek bar ends where the bar's does.
+    pub(crate) fn tools_like(sessions: Entity<SessionsButton>, pip: bool, cx: &App) -> Div {
         div()
             .flex()
             .flex_none()
             .items_center()
             .gap_1()
             .when(Self::picker_shown(cx), |this| this.child(sessions))
+            .when(pip, |this| {
+                this.child(Self::pip_button().tint(cx.theme().muted_foreground))
+            })
     }
 
     /// How the bar draws its volume control at this width, in whatever layout it has.
@@ -828,7 +842,7 @@ impl Render for PlayerBar {
         let layout = self.settings.read(cx).player_bar_layout();
         let stacked = Self::stacked(window, layout);
         // Equal wings keep the title centered while reserving the original volume slider width.
-        let centered_wing = theme.metrics.control * 4. + px(VOLUME_WIDTH) + theme.metrics.pad * 3.;
+        let centered_wing = theme.metrics.control * 5. + px(VOLUME_WIDTH) + theme.metrics.pad * 3.;
         let sides = match SidebarRight::available(window) {
             true => Some(self.side_buttons(cx)),
             false => None,
@@ -842,7 +856,8 @@ impl Render for PlayerBar {
             .items_center()
             .gap_1()
             .when(picker, |this| this.child(self.sessions.clone()))
-            .children(sides);
+            .children(sides)
+            .child(Self::pip_button().tint(theme.muted_foreground));
 
         // Only the island has a seek line that opens. Another layout, or a window too narrow
         // for the island, starts it shut the next time.

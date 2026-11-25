@@ -58,11 +58,13 @@ pub(crate) struct Ambient {
     washing: bool,
     /// Whether a wait for the next drift frame is already running.
     pacing: Option<Task<()>>,
-    /// The palette of the cover a framed field follows, `None` for the one behind the window.
-    framed: Option<Sampled>,
+    /// The palette of the cover the field follows, `None` for one painted from the theme.
+    sampled: Option<Sampled>,
+    /// Whether the field fills a frame of its own rather than the window.
+    framed: bool,
 }
 
-/// The palette of the cover a framed field follows, sampled by the field itself.
+/// The palette of the cover a field follows, sampled by the field itself.
 #[derive(Default)]
 struct Sampled {
     cover: Option<String>,
@@ -84,7 +86,8 @@ impl Ambient {
             painted: None,
             washing: false,
             pacing: None,
-            framed: None,
+            sampled: None,
+            framed: false,
         }
     }
 
@@ -93,15 +96,24 @@ impl Ambient {
     /// square for the frame to round.
     pub(crate) fn framed(cx: &mut Context<Self>) -> Self {
         Self {
-            framed: Some(Sampled::default()),
+            framed: true,
+            ..Self::following(cx)
+        }
+    }
+
+    /// A field that fills the window and takes its colours from the cover `follow` hands it, for
+    /// a window that wears the fullscreen theme beside one that does not.
+    pub(crate) fn following(cx: &mut Context<Self>) -> Self {
+        Self {
+            sampled: Some(Sampled::default()),
             ..Self::new(cx)
         }
     }
 
-    /// Samples `cover` for a framed field once it differs from the one sampled last. A field
-    /// behind the window takes its colours from the theme and ignores this.
+    /// Samples `cover` for a following field once it differs from the one sampled last. A field
+    /// painted from the theme ignores this.
     pub(crate) fn follow(&mut self, cover: Option<String>, cx: &mut Context<Self>) {
-        let Some(sampled) = self.framed.as_mut() else {
+        let Some(sampled) = self.sampled.as_mut() else {
             return;
         };
         if sampled.cover == cover {
@@ -118,7 +130,7 @@ impl Ambient {
         sampled._task = Some(cx.spawn(async move |this, cx| {
             let palette = palette.await;
             this.update(cx, |this, cx| {
-                if let Some(sampled) = this.framed.as_mut() {
+                if let Some(sampled) = this.sampled.as_mut() {
                     sampled.palette = palette;
                     cx.notify();
                 }
@@ -127,10 +139,10 @@ impl Ambient {
         }));
     }
 
-    /// The theme this field is painted from: the app's own behind the window, and in a frame
-    /// the one fullscreen would wear for the sampled cover. A preview draws over it with the same.
+    /// The theme this field is painted from: the app's own, or the one fullscreen would wear for
+    /// the sampled cover. Whatever is drawn over a following field wears the same.
     pub(crate) fn theme(&self, cx: &App) -> Theme {
-        match &self.framed {
+        match &self.sampled {
             None => *cx.theme(),
             Some(sampled) => adaptive::stage(sampled.palette, cx),
         }
@@ -276,8 +288,8 @@ impl Render for Ambient {
         // The field reaches into the corners the chrome rounds, so it takes that radius itself.
         // A framed field leaves its corners to the frame.
         let radius = match self.framed {
-            None => window_radius(window, cx),
-            Some(_) => None,
+            false => window_radius(window, cx),
+            true => None,
         };
 
         let waves = ui::Waves::new(layered(colors).map(shaded))
@@ -294,8 +306,8 @@ impl Render for Ambient {
             .opacity(clarity)
             .map(|this| match self.framed {
                 // A preview is small enough to draw at full size.
-                Some(_) => this.child(waves),
-                None => {
+                true => this.child(waves),
+                false => {
                     let viewport = window.viewport_size();
                     let scale = window.scale_factor();
                     this.child(

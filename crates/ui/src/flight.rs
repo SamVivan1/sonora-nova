@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Bounds, Element, ElementId, Global, GlobalElementId, InspectorElementId,
-    LayerFilter, LayoutId, Pixels, Point, SharedString, Size, SpringConfig, Window, point, px,
+    LayerFilter, LayoutId, Pixels, Point, SharedString, Size, SpringConfig, Window, WindowId,
+    point, px,
 };
 
 use crate::motion::{Springs, Sprung};
@@ -100,9 +101,10 @@ struct Course {
     to: f32,
 }
 
-/// Where each named flight was last seen, for another to start from as it appears.
+/// Where each named flight was last seen, for another in the same window to start from as it
+/// appears.
 #[derive(Default)]
-struct Sightings(HashMap<SharedString, (Bounds<Pixels>, Instant)>);
+struct Sightings(HashMap<(WindowId, SharedString), (Bounds<Pixels>, Instant)>);
 
 impl Global for Sightings {}
 
@@ -268,11 +270,12 @@ impl Element for Flight {
         cx: &mut App,
     ) -> bool {
         let viewport = window.viewport_size();
+        let here = window.window_handle().window_id();
         let recent = self.recent;
         let sighting = self
             .lands_from
             .as_ref()
-            .and_then(|name| cx.try_global::<Sightings>()?.0.get(name).copied())
+            .and_then(|name| seen(here, name, cx))
             .filter(|(_, seen)| !recent || seen.elapsed() < RECENT)
             .map(|(bounds, _)| bounds);
         let (spring, scales, follows) = (self.spring, self.scales, self.follows);
@@ -280,7 +283,7 @@ impl Element for Flight {
         let heading = self
             .heads_to
             .as_ref()
-            .and_then(|name| cx.try_global::<Sightings>()?.0.get(name).copied())
+            .and_then(|name| seen(here, name, cx))
             .map(|(bounds, _)| bounds);
         let (offset, zoom) = window.with_element_state(
             id.expect("a flight has an id"),
@@ -377,9 +380,10 @@ impl Element for Flight {
         }
         self.pose.set((offset, scale * self.present));
         if let Some(name) = &self.seen_as {
-            cx.default_global::<Sightings>()
-                .0
-                .insert(name.clone(), (posed(bounds, offset, scale), Instant::now()));
+            cx.default_global::<Sightings>().0.insert(
+                (here, name.clone()),
+                (posed(bounds, offset, scale), Instant::now()),
+            );
         }
 
         let flying = offset != Point::default() || scale != 1.;
@@ -484,6 +488,12 @@ impl IntoElement for Posed {
     fn into_element(self) -> Self::Element {
         self
     }
+}
+
+/// Where the flight named `name` was last seen in `window`.
+fn seen(window: WindowId, name: &SharedString, cx: &App) -> Option<(Bounds<Pixels>, Instant)> {
+    let sightings = cx.try_global::<Sightings>()?;
+    sightings.0.get(&(window, name.clone())).copied()
 }
 
 /// `bounds` shifted by `offset` and scaled by `scale` about their centre.
