@@ -9,7 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- A picture-in-picture button in the player and in Now playing, or the P key, opens Now playing in a small window. It stays above other apps on Windows and X11, and on GNOME Wayland with the In Picture extension.
+- A picture-in-picture button in the player and in Now playing, or the P key, opens Now playing in a small window. It stays above other apps on Windows and X11, and on GNOME Wayland with the In Picture extension. It stays open when the main window closes, and the tray menu opens it too.
 - Plex is a new provider. Sign in with your Plex account and play, search, rate, make playlists, start song radio and read lyrics from your own Plex Media Server.
 - Settings → Player bar has an Island layout that floats the player as a rounded pill over the page, and resting the pointer on its thin progress line opens it with both times.
 - In a Jam or a Session, the player shows the face of whoever queued the song playing now, and the Members panel rings them.

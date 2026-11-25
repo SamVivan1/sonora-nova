@@ -210,6 +210,7 @@ fn main() -> ExitCode {
         memory::watch(cx);
 
         open_window(cx);
+        pip::follow_links(cx);
         let session = Sonora::global(cx).session.clone();
         session.update(cx, |session, cx| session.restore(cx));
 
@@ -385,6 +386,7 @@ fn window_action(visible: Option<bool>) -> WindowAction {
 }
 
 fn open_window(cx: &mut App) {
+    actions::unhide(cx);
     let Sonora {
         session,
         library,

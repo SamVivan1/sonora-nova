@@ -34,6 +34,7 @@ pub struct Icon {
     shuffle: CheckMenuItem,
     repeat: CheckMenuItem,
     show: MenuItem,
+    pip: MenuItem,
     quit: MenuItem,
 }
 
@@ -54,6 +55,7 @@ impl Icon {
         let shuffle = CheckMenuItem::with_id("shuffle", "", true, false, None);
         let repeat = CheckMenuItem::with_id("repeat", "", true, false, None);
         let show = MenuItem::with_id("show", "", true, None);
+        let pip = MenuItem::with_id("pip", "", true, None);
         let quit = MenuItem::with_id("quit", "", true, None);
         let menu = Menu::new();
         if let Err(error) = menu.append_items(&[
@@ -67,6 +69,7 @@ impl Icon {
             &repeat,
             &PredefinedMenuItem::separator(),
             &show,
+            &pip,
             &quit,
         ]) {
             log::warn!("tray: cannot build the tray menu: {error:#}");
@@ -105,6 +108,7 @@ impl Icon {
             shuffle,
             repeat,
             show,
+            pip,
             quit,
         })
     }
@@ -168,6 +172,7 @@ impl Icon {
         self.repeat.set_text(&shown.repeat);
         self.repeat.set_checked(shown.repeat_on);
         self.show.set_text(&shown.show);
+        self.pip.set_text(&shown.pip);
         self.quit.set_text(&shown.quit);
     }
 }
@@ -283,6 +288,7 @@ fn translate(id: &MenuId) -> Option<Event> {
         "shuffle" => Event::Shuffle,
         "repeat" => Event::Repeat,
         "show" => Event::Show,
+        "pip" => Event::Pip,
         "quit" => Event::Quit,
         _ => return None,
     })

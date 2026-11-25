@@ -13,9 +13,9 @@ use ui::{ActiveTheme as _, Copy, Cut, Look, Paste, SelectAll, Theme};
 /// How far one font size shortcut moves the size, the same step as the buttons in Settings.
 const FONT_STEP: f32 = 1.;
 
-/// Present while a tray click closes the window, so Sonora stays in the tray even with close to
-/// tray turned off.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// Present while the app belongs in the tray, after a tray click closed the window or opened
+/// picture-in-picture on its own, so the last window closing leaves Sonora in the tray even with
+/// close to tray turned off.
 struct HidingToTray;
 
 impl Global for HidingToTray {}
@@ -33,6 +33,19 @@ pub fn hide_to_tray(cx: &mut App) {
         .ok();
 }
 
+/// Sends the app back to the tray once the picture-in-picture window opened out of it closes.
+pub fn opened_from_tray(cx: &mut App) {
+    cx.set_global(HidingToTray);
+}
+
+/// Forgets that the window was hidden into the tray, for one that comes back while a
+/// picture-in-picture window kept the app open.
+pub fn unhide(cx: &mut App) {
+    if cx.has_global::<HidingToTray>() {
+        cx.remove_global::<HidingToTray>();
+    }
+}
+
 pub fn register(lingers: bool, cx: &mut App) {
     bind_keys(cx);
 
@@ -42,10 +55,14 @@ pub fn register(lingers: bool, cx: &mut App) {
     cx.on_action(|_: &ShowAll, cx: &mut App| cx.unhide_other_apps());
 
     cx.on_window_closed(move |cx, _| {
-        // The picture-in-picture window goes with the main one, so it never keeps the app out of
-        // the tray.
+        // A picture-in-picture window stays open without the main one, whose focus and fullscreen
+        // no longer count for anything.
         if crate::main_window(cx).is_none() {
-            crate::pip::close(cx);
+            let wake = Sonora::global(cx).wake.clone();
+            wake.update(cx, |wake, cx| {
+                wake.set_fullscreen(false, cx);
+                wake.set_focused(false, cx);
+            });
         }
         if !cx.windows().is_empty() {
             return;

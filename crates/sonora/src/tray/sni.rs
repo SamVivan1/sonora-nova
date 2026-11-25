@@ -193,6 +193,7 @@ impl ksni::Tray for Item {
             self.checkmark(&shown.repeat, shown.repeat_on, Event::Repeat),
             MenuItem::Separator,
             self.entry(&shown.show, Event::Show),
+            self.entry(&shown.pip, Event::Pip),
             self.entry(&shown.quit, Event::Quit),
         ]
     }

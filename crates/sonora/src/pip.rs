@@ -7,6 +7,7 @@ use gpui::{
     App, AppContext as _, Bounds, Pixels, Size, TitlebarOptions, WindowBounds, WindowHandle,
     WindowOptions, point, px, size,
 };
+use router::NavigationEvent;
 use state::Sonora;
 #[cfg(target_os = "linux")]
 use state::{Outcome, Toast, Toasts};
@@ -26,10 +27,14 @@ const EXTENSION: &str = "in-picture@filiprund.cz";
 #[cfg(target_os = "linux")]
 const EXTENSION_PAGE: &str = "https://extensions.gnome.org/extension/8692/in-picture/";
 
-/// Opens the window, or closes the one that is open. It opens only beside a main window.
+/// Opens the window, or closes the one that is open.
 pub fn toggle(cx: &mut App) {
-    if close(cx) || crate::main_window(cx).is_none() {
+    if close(cx) {
         return;
+    }
+    crate::dock::show(true);
+    if crate::main_window(cx).is_none() {
+        crate::actions::opened_from_tray(cx);
     }
     if let Err(error) = open(cx) {
         log::warn!("pip: cannot open the window: {error:#}");
@@ -37,7 +42,7 @@ pub fn toggle(cx: &mut App) {
 }
 
 /// Closes the window and returns whether one was open.
-pub fn close(cx: &mut App) -> bool {
+fn close(cx: &mut App) -> bool {
     let Some(window) = find(cx) else {
         return false;
     };
@@ -48,6 +53,17 @@ pub fn close(cx: &mut App) -> bool {
             .ok();
     });
     true
+}
+
+/// Brings the main window back for a link followed in the window while the main one is closed,
+/// since only the main window draws pages.
+pub fn follow_links(cx: &mut App) {
+    cx.subscribe(&router::trail(cx), |_, _: &NavigationEvent, cx| {
+        if find(cx).is_some() && crate::main_window(cx).is_none() {
+            crate::show_window(cx);
+        }
+    })
+    .detach();
 }
 
 fn find(cx: &App) -> Option<WindowHandle<PipView>> {

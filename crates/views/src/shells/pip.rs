@@ -1,13 +1,13 @@
 use gpui::prelude::*;
-use gpui::{App, Context, Entity, Pixels, Render, Window, div};
+use gpui::{App, Context, Entity, Pixels, Render, Window, deferred, div};
 use input::{CloseWindow, MinimizeWindow};
 use state::{Playback, Sonora};
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use ui::WindowFrame;
 use ui::{ActiveTheme as _, Themed};
 
-use crate::chrome::{TitleBar, TitleBarOptions};
-use crate::root::{middle_scrolled, ui_font};
+use crate::chrome::{TitleBar, TitleBarOptions, ToastStack};
+use crate::root::{Root, middle_scrolled, ui_font};
 use crate::shared::ambient::{self, Ambient};
 use crate::shells::Shell as _;
 use crate::shells::fullscreen::FullscreenView;
@@ -20,6 +20,8 @@ pub struct PipView {
     title_bar: Entity<TitleBar>,
     field: Entity<Ambient>,
     player: Entity<FullscreenView>,
+    /// The toasts, drawn here only while there is no main window to show them.
+    toasts: Entity<ToastStack>,
     background: gpui::WindowBackgroundAppearance,
 }
 
@@ -49,6 +51,7 @@ impl PipView {
             title_bar: cx.new(TitleBar::new),
             field,
             player,
+            toasts: cx.new(ToastStack::new),
         }
     }
 
@@ -92,6 +95,11 @@ impl Render for PipView {
         #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
         let radius: Option<Pixels> = None;
 
+        let alone = !cx
+            .windows()
+            .iter()
+            .any(|window| window.downcast::<Root>().is_some());
+
         let root = div()
             .relative()
             .flex()
@@ -118,6 +126,17 @@ impl Render for PipView {
                     .min_h_0()
                     .child(self.player.clone()),
             )
+            .when(alone, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .h(FullscreenView::dock_height(cx))
+                        .child(deferred(self.toasts.clone())),
+                )
+            })
             .child(ui::lingers());
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         let root = root.child(WindowFrame::new());

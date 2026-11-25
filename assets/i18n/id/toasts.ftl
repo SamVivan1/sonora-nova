@@ -210,6 +210,6 @@ toast-sample-save-failed = { $name } tidak dapat disimpan
 toast-sample-save-failed-detail = Server menjawab 503 Service Unavailable
 toast-sample-lasting = Notifikasi ini tetap tampil sampai Anda menutupnya
 toast-sample-burst = Notifikasi nomor { $name }
-toast-pip-extension = Gambar-dalam-gambar perlu ekstensi agar selalu di atas
+toast-pip-extension = PiP perlu ekstensi agar selalu di atas
 toast-pip-extension-note = In Picture, untuk GNOME di Wayland
 toast-pip-extension-get = Dapatkan

@@ -30,6 +30,8 @@ pub enum Event {
     Show,
     /// Show the window when it is hidden or minimized and hide it when it is visible.
     Window,
+    /// Open the picture-in-picture window, or close the one that is open.
+    Pip,
     Song,
     Toggle,
     Previous,
@@ -61,6 +63,7 @@ pub struct Shown {
     pub repeat: SharedString,
     pub repeat_on: bool,
     pub show: SharedString,
+    pub pip: SharedString,
     pub quit: SharedString,
     pub playing: bool,
 }
@@ -131,6 +134,7 @@ impl Tray {
                 cx.update(|cx| match event {
                     Event::Show => show(cx),
                     Event::Window => toggle(cx),
+                    Event::Pip => crate::pip::toggle(cx),
                     Event::Song => {
                         show(cx);
                         open(cx);
@@ -354,6 +358,7 @@ fn shown(artwork: Option<Arc<Art>>, cx: &App) -> Shown {
         repeat: t!("player-repeat"),
         repeat_on,
         show: t!("tray-show"),
+        pip: t!("player-pip"),
         quit: t!("app-quit"),
         playing,
     }
