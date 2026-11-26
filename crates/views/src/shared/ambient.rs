@@ -16,7 +16,7 @@
 use std::time::Instant;
 
 use gpui::prelude::*;
-use gpui::{App, Context, Hsla, Pixels, Render, Rgba, Task, Window, div, px};
+use gpui::{App, Context, EventEmitter, Hsla, Pixels, Render, Rgba, Task, Window, div, px};
 use state::Sonora;
 use ui::{ActiveTheme as _, CoverPalette, Theme};
 
@@ -63,6 +63,10 @@ pub(crate) struct Ambient {
     /// Whether the field fills a frame of its own rather than the window.
     framed: bool,
 }
+
+/// Emitted by a following field once the colours sampled off the cover it follows land, for
+/// whatever draws over it in those colours.
+pub(crate) struct Landed;
 
 /// The palette of the cover a field follows, sampled by the field itself.
 #[derive(Default)]
@@ -132,6 +136,7 @@ impl Ambient {
             this.update(cx, |this, cx| {
                 if let Some(sampled) = this.sampled.as_mut() {
                     sampled.palette = palette;
+                    cx.emit(Landed);
                     cx.notify();
                 }
             })
@@ -263,6 +268,8 @@ impl Ambient {
     }
 }
 
+impl EventEmitter<Landed> for Ambient {}
+
 impl Render for Ambient {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme(cx);
@@ -292,11 +299,12 @@ impl Render for Ambient {
             true => None,
         };
 
+        let stage = shaded(Hsla {
+            a: 1.,
+            ..theme.background
+        });
         let waves = ui::Waves::new(layered(colors).map(shaded))
-            .stage(shaded(Hsla {
-                a: 1.,
-                ..theme.background
-            }))
+            .stage(stage)
             .time(elapsed);
 
         div()
@@ -310,7 +318,29 @@ impl Render for Ambient {
                 false => {
                     let viewport = window.viewport_size();
                     let scale = window.scale_factor();
+                    // gpui keeps a scaled layer out of the overscan past the window's right and
+                    // bottom edges, so a backdrop near them, such as fullscreen's veil under the
+                    // controls, would blur in nothing there and let the desktop through. The
+                    // stage carries on past those edges instead, where the window never shows it.
                     this.child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(viewport.height)
+                            .w(viewport.width * 2.)
+                            .h(viewport.height)
+                            .bg(stage),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left(viewport.width)
+                            .top_0()
+                            .w(viewport.width)
+                            .h(viewport.height)
+                            .bg(stage),
+                    )
+                    .child(
                         div()
                             .absolute()
                             .top_0()

@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 use gpui::accesskit::Role;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, AnyView, App, Bounds, ClickEvent, Context, Entity, FocusHandle, FontWeight,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point, Render, ScrollWheelEvent, SharedString, SpringConfig, SpringState, Stateful,
-    Task, TextShadow,
+    AnyElement, AnyView, App, Bounds, ClickEvent, Context, Entity, EntityId, FocusHandle,
+    FontWeight, KeyDownEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, Render, ScrollEvent, SharedString, SpringConfig, SpringState,
+    Stateful, StyleRefinement, Task, TextRun, TextShadow,
 };
 use gpui::{Div, Window, anchored, canvas, deferred, div, phi, point, px, rems};
 use i18n::t;
@@ -31,8 +31,8 @@ use crate::shared::menus::ItemMenu;
 use crate::shared::now_playing::track_details;
 use crate::shared::rooted::Rooted;
 use crate::shared::transport::{
-    COVER_FLIGHT, CoverFade, CoverRoom, ShellSwap, clock_ems, end_clock, fraction, like, moved,
-    transport,
+    Backdrops, COVER_FLIGHT, CoverFade, CoverRoom, ShellSwap, clock_ems, end_clock, fraction, like,
+    moved, transport,
 };
 use crate::shared::visualizer::VisualizerDrive;
 use crate::shared::volume::{
@@ -206,26 +206,59 @@ impl FullscreenView {
         cx.theme().metrics.player_bar * DOCK_FULL
     }
 
+    /// Root embeds the player cached, so it renders only when notified. Every entity and global
+    /// its render reads is observed here, and none of them redraws a player that is not on show.
     pub fn new(playback: Entity<Playback>, queue: Entity<Queue>, cx: &mut Context<Self>) -> Self {
-        cx.observe(&playback, |_, _, cx| cx.notify()).detach();
+        cx.observe(&playback, |this, _, cx| this.redraw(cx))
+            .detach();
         let sponsorblock = Sonora::global(cx).sponsorblock.clone();
-        cx.observe(&sponsorblock, |_, _, cx| cx.notify()).detach();
+        cx.observe(&sponsorblock, |this, _, cx| this.redraw(cx))
+            .detach();
         // the seek bar and the lyrics follow the position as it moves
         let ticks = playback.read(cx).ticks().clone();
-        cx.observe(&ticks, |_, _, cx| cx.notify()).detach();
+        cx.observe(&ticks, |this, _, cx| this.redraw(cx)).detach();
         let cover = Sonora::global(cx).cover.clone();
-        cx.observe(&cover, |_, _, cx| cx.notify()).detach();
+        cx.observe(&cover, |this, _, cx| this.redraw(cx)).detach();
         let library = Sonora::global(cx).library.clone();
-        cx.observe(&library, |_, _, cx| cx.notify()).detach();
+        cx.observe(&library, |this, _, cx| this.redraw(cx)).detach();
+        // Another device steering playback, a Jam and its members, and the Sessions button.
+        let devices = Sonora::global(cx).devices.clone();
+        cx.observe(&devices, |this, _, cx| this.redraw(cx)).detach();
+        let listening = Sonora::global(cx).listening.clone();
+        cx.observe(&listening, |this, _, cx| this.redraw(cx))
+            .detach();
+        // Shuffle, repeat and who queued the playing song.
+        cx.observe(&queue, |this, _, cx| this.redraw(cx)).detach();
+        // The track menu over the title shows download progress and pins.
+        let downloads = Sonora::global(cx).downloads.clone();
+        cx.observe(&downloads, |this, _, cx| {
+            if this.context_menu.is_some() {
+                this.redraw(cx);
+            }
+        })
+        .detach();
+        let pins = Sonora::global(cx).pins.clone();
+        cx.observe(&pins, |this, _, cx| {
+            if this.context_menu.is_some() {
+                this.redraw(cx);
+            }
+        })
+        .detach();
         // The meta drops its text shadows while the player opens or closes.
-        cx.observe_global::<ShellSwap>(|_, cx| cx.notify()).detach();
-        cx.observe_global::<CoverRoom>(|_, cx| cx.notify()).detach();
+        cx.observe_global::<ShellSwap>(|this, cx| this.redraw(cx))
+            .detach();
+        cx.observe_global::<CoverRoom>(|this, cx| this.redraw(cx))
+            .detach();
+        cx.observe_global::<CoverFade>(|this, cx| this.redraw(cx))
+            .detach();
+        cx.observe_global::<Backdrops>(|this, cx| this.redraw(cx))
+            .detach();
         let settings = Sonora::global(cx).settings.clone();
         cx.observe(&settings, |this, settings, cx| {
             if this.panel == Some(SideTab::Lyrics) && !settings.read(cx).lyrics_enabled() {
                 this.panel = None;
             }
-            cx.notify();
+            this.redraw(cx);
         })
         .detach();
         let panel = settings.read(cx).fullscreen_tab();
@@ -307,6 +340,10 @@ impl FullscreenView {
         window.focus(&self.focus, cx);
     }
 
+    pub fn focus_handle(&self) -> FocusHandle {
+        self.focus.clone()
+    }
+
     /// Starts the idle clock as the view opens and stops it as the view closes, so it never
     /// hides the cursor over the workspace. Either way the view next shows with its controls up.
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
@@ -325,6 +362,14 @@ impl FullscreenView {
             false => self.rest = None,
         }
         cx.notify();
+    }
+
+    /// Renders the player again for something it shows, but only while it is the shell on show.
+    /// `set_shown` renders it afresh as it opens.
+    fn redraw(&mut self, cx: &mut Context<Self>) {
+        if self.on_show {
+            cx.notify();
+        }
     }
 
     /// Selects the fullscreen panel and restarts the controls' idle timer.
@@ -347,6 +392,7 @@ impl FullscreenView {
         if let Some(tab) = panel {
             self.aside.update(cx, |aside, cx| aside.show(tab, cx));
         }
+        cx.notify();
     }
 
     /// Flips the fullscreen panel to `tab` from a key press. The cover comes back when `tab`
@@ -432,9 +478,9 @@ impl FullscreenView {
 
     /// Whether anything under the pointer should hold the chrome awake. A hover flag only counts
     /// while the pointer is over the window: one set when it left stays set, and a stale flag
-    /// would keep the controls up for good. A Jam invite or a panel's track menu drawn over the
-    /// view holds it too, since the pointer over either never reaches the view and the cursor
-    /// would hide under it.
+    /// would keep the controls up for good. A Jam invite, a panel's track menu or the Sessions
+    /// menu drawn over the view holds it too, since the pointer over any of them never reaches
+    /// the view and the cursor would hide under it.
     fn busy(&self, cx: &App) -> bool {
         let parked = self.volume.parked()
             || self.over_pill
@@ -448,6 +494,7 @@ impl FullscreenView {
             || self.volume.held
             || self.pending.is_some()
             || self.context_menu.is_some()
+            || self.sessions.read(cx).open()
             || (self.panel.is_some() && self.aside.read(cx).menu_open())
             || Sonora::global(cx).devices.read(cx).invite().is_some()
     }
@@ -579,6 +626,7 @@ impl FullscreenView {
         };
         self.playback
             .update(cx, |playback, cx| playback.seek_fraction(fraction, cx));
+        cx.notify();
     }
 
     fn artwork(
@@ -650,9 +698,13 @@ impl FullscreenView {
             .flex_none()
             .child({
                 let bounds = self.cover_bounds.clone();
-                canvas(move |at, _, _| bounds.set(at), |_, _, _, _| {})
-                    .absolute()
-                    .size_full()
+                let me = cx.entity_id();
+                canvas(
+                    move |at, window, _| keep(&bounds, at, me, window),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full()
             })
             .when_some(album, |this, album| {
                 this.role(Role::Link)
@@ -750,6 +802,7 @@ impl FullscreenView {
         let opens = album.is_some();
         let explicit = track.is_some_and(|track| track.explicit);
         let meta_bounds = self.meta_bounds.clone();
+        let me = cx.entity_id();
         // Both lines carry a shadow in the page colour, so they stay legible where a visualizer
         // peak or bright ambient art passes behind them. The title ellipsizes without
         // `truncate`, whose `overflow_hidden` would clip the shadow to the line box. Every shadow
@@ -788,12 +841,15 @@ impl FullscreenView {
             .min_w_0()
             .map(|this| glide(this, lift, px(SHADOW_BLEED), window))
             .child(
-                canvas(move |bounds, _, _| meta_bounds.set(bounds), |_, _, _, _| {})
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .top(px(SHADOW_BLEED))
-                    .bottom(px(SHADOW_BLEED)),
+                canvas(
+                    move |bounds, window, _| keep(&meta_bounds, bounds, me, window),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(px(SHADOW_BLEED))
+                .bottom(px(SHADOW_BLEED)),
             )
             .child(
                 // Three-part row with equal flex sides, so the title stays truly centred:
@@ -1134,10 +1190,30 @@ impl FullscreenView {
             )
     }
 
-    /// The seek bar over the transport, with the volume at the transport row's right end. They
-    /// stand centred under the cover from `Room::Wide` up, at most `deck` wide, so they keep one
-    /// width whether they sit in the column or at the bottom.
-    fn controls(&self, deck: Pixels, hide: f32, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The seek bar over the transport, with the Sessions button under the elapsed clock and the
+    /// volume under the end clock, each centred on its clock's text. They stand centred under the
+    /// cover from `Room::Wide` up, at most `deck` wide, so they keep one width whether they sit
+    /// in the column or at the bottom.
+    fn controls(
+        &self,
+        deck: Pixels,
+        hide: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let theme = *cx.theme();
+        let size = theme.text(Text::Tiny);
+        let (elapsed, total) = self.playback.read(cx).shown_time(cx);
+        let time_left = self.settings.read(cx).player_bar_time_left();
+        // Each clock sits at the deck's edge in a box this wide, its text pressed to the seek bar.
+        // A button centres in a slot from that edge to twice its clock's middle.
+        let label = size * clock_ems(total, time_left);
+        let slot = |text: SharedString| {
+            snapped((label - clock_width(text, size, window) / 2.) * 2., window)
+        };
+        let start = slot(clock(elapsed));
+        let end = slot(end_clock(elapsed, total, time_left).text);
+
         let stack = div()
             .flex()
             .flex_col()
@@ -1153,11 +1229,25 @@ impl FullscreenView {
                     .child(
                         div()
                             .absolute()
+                            .left_0()
+                            .top_0()
+                            .bottom_0()
+                            .w(start)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(PlayerBar::tools_like(self.sessions.clone(), false, cx)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
                             .right_0()
                             .top_0()
                             .bottom_0()
+                            .w(end)
                             .flex()
                             .items_center()
+                            .justify_center()
                             .child(self.sound(cx)),
                     ),
             );
@@ -1195,6 +1285,7 @@ impl FullscreenView {
         hide: f32,
         collapses: bool,
         deck: Pixels,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         // The clamp runs from the controls' own height once it is known. From a taller cap the
@@ -1208,6 +1299,7 @@ impl FullscreenView {
             false => cap,
         };
         let measured = self.dock_natural.clone();
+        let me = cx.entity_id();
         div()
             .flex()
             .flex_none()
@@ -1231,13 +1323,15 @@ impl FullscreenView {
                         .top(px(SINK) * hide)
                         .child(
                             canvas(
-                                move |bounds, _, _| measured.set(bounds.size.height),
+                                move |bounds, window, _| {
+                                    keep(&measured, bounds.size.height, me, window)
+                                },
                                 |_, _, _, _| {},
                             )
                             .absolute()
                             .size_full(),
                         )
-                        .child(self.controls(deck, hide, cx)),
+                        .child(self.controls(deck, hide, window, cx)),
                 )
             })
     }
@@ -1549,6 +1643,9 @@ impl Shell for FullscreenView {
 impl Render for FullscreenView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
+        let me = cx.entity_id();
+        // The cover's flight reports its zoom as it prepaints, after the artwork read it.
+        let zoomed = self.cover_zoom.get();
         let viewport = window.viewport_size();
         let room = Room::of(viewport.width);
         let narrow = !room.fits(Room::Wide);
@@ -1742,6 +1839,9 @@ impl Render for FullscreenView {
             true => 1.,
             false => 1. - hide,
         };
+        let backdrops = cx
+            .try_global::<Backdrops>()
+            .map_or(1., |backdrops| backdrops.0);
         if visualizer_presence > 0. && veiled > 0. && shared::effects() {
             let band = viewport.height * VEIL;
             spectrum.push(
@@ -1751,7 +1851,7 @@ impl Render for FullscreenView {
                     .right_0()
                     .bottom_0()
                     .h(band)
-                    .opacity(veiled * (visualizer_presence * VEIL_LEAD).min(1.))
+                    .opacity(backdrops * veiled * (visualizer_presence * VEIL_LEAD).min(1.))
                     .child(veil(
                         VeilEdge::Bottom,
                         band,
@@ -1794,7 +1894,8 @@ impl Render for FullscreenView {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .w_full()
+            // Root lays the cached player out on its own, which only fills its place this way.
+            .size_full()
             .gap_5()
             // Below `Room::Wide` the page keeps the player bar's own side padding, which is the
             // corner's too, so the strip and the row along the bottom start and end where the
@@ -1825,7 +1926,7 @@ impl Render for FullscreenView {
                 },
             ))
             // A trackpad reports fingers that only touch it as a scroll that moves nothing.
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, window, cx| {
                 if event.delta.pixel_delta(window.line_height()) != Point::default() {
                     if !this.awake {
                         cx.show_cursor();
@@ -1841,14 +1942,17 @@ impl Render for FullscreenView {
                 cx.listener(|this, _: &ToggleQueue, _, cx| this.toggle_panel(SideTab::Queue, cx)),
             )
             .child(
-                canvas(move |bounds, _, _| root_bounds.set(bounds), |_, _, _, _| {})
-                    .absolute()
-                    .size_full(),
+                canvas(
+                    move |bounds, window, _| keep(&root_bounds, bounds, me, window),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
             )
             .child({
                 let root_origin = self.root_origin.clone();
                 canvas(
-                    move |bounds, _, _| root_origin.set(bounds.origin),
+                    move |bounds, window, _| keep(&root_origin, bounds.origin, me, window),
                     |_, _, _, _| {},
                 )
                 .absolute()
@@ -1888,7 +1992,9 @@ impl Render for FullscreenView {
                                 let meta_bounds = self.meta_bounds.clone();
                                 div().relative().w_full().child(
                                     canvas(
-                                        move |bounds, _, _| meta_bounds.set(bounds),
+                                        move |bounds, window, _| {
+                                            keep(&meta_bounds, bounds, me, window)
+                                        },
                                         |_, _, _, _| {},
                                     )
                                     .absolute()
@@ -1902,6 +2008,7 @@ impl Render for FullscreenView {
                                 hide,
                                 false,
                                 deck,
+                                window,
                                 cx,
                             ))
                         })
@@ -1921,14 +2028,23 @@ impl Render for FullscreenView {
                         .child({
                             let panel_bounds = self.panel_bounds.clone();
                             canvas(
-                                move |bounds, _, _| panel_bounds.set(bounds),
+                                move |bounds, window, _| keep(&panel_bounds, bounds, me, window),
                                 |_, _, _, _| {},
                             )
                             .absolute()
                             .size_full()
                         })
+                        // The panel replays while the player renders around it. A switch fades it,
+                        // and a cached view would replay the opacity it was cached under.
                         .child(entering(
-                            div().size_full().min_h_0().child(self.aside.clone()),
+                            div().size_full().min_h_0().child(match switching > 0. {
+                                true => self.aside.clone().into_any_element(),
+                                false => self
+                                    .aside
+                                    .clone()
+                                    .cached(StyleRefinement::default().size_full())
+                                    .into_any_element(),
+                            }),
                             switching,
                         ))
                         .into_any_element()
@@ -2016,6 +2132,7 @@ impl Render for FullscreenView {
                             hide,
                             !staged,
                             deck,
+                            window,
                             cx,
                         ))
                     })
@@ -2027,6 +2144,18 @@ impl Render for FullscreenView {
                 this.child(self.dormant(cx))
             })
             .children(self.menu(cx))
+            .child({
+                let zoom = self.cover_zoom.clone();
+                canvas(
+                    move |_, window, _| {
+                        if zoom.get() != zoomed {
+                            window.on_next_frame(move |_, cx| cx.notify(me));
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+            })
     }
 }
 
@@ -2106,6 +2235,19 @@ fn glide<E: Styled>(element: E, offset: Pixels, bleed: Pixels, window: &Window) 
     }
 }
 
+/// Keeps `value` in `cell` and renders `owner` next frame when it moved. The player reads these
+/// cells as it renders, a frame after they were measured, and nothing else would render it again.
+fn keep<T: Copy + PartialEq + 'static>(
+    cell: &Cell<T>,
+    value: T,
+    owner: EntityId,
+    window: &mut Window,
+) {
+    if cell.replace(value) != value {
+        window.on_next_frame(move |_, cx| cx.notify(owner));
+    }
+}
+
 fn presentation_scale(presented: Pixels, layout: Pixels) -> f32 {
     presented.as_f32() / layout.as_f32()
 }
@@ -2115,6 +2257,24 @@ fn presentation_scale(presented: Pixels, layout: Pixels) -> f32 {
 /// event alone tells.
 fn hovered(window: &Window) -> bool {
     cfg!(target_os = "macos") || window.is_window_hovered()
+}
+
+/// How wide `text` sets at `size` in the tabular figures the seek bar's clocks use.
+fn clock_width(text: SharedString, size: Pixels, window: &Window) -> Pixels {
+    let mut font = window.text_style().font();
+    font.features = ui::tabular();
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color: gpui::black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    window
+        .text_system()
+        .shape_line(text, size, &[run], None)
+        .width
 }
 
 #[cfg(test)]

@@ -91,7 +91,7 @@ impl Render for PipView {
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         let radius = crate::chrome::window_radius(settings, cx, window);
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-        window.set_window_corner_radius(radius.unwrap_or_default());
+        window.set_client_corner_radii(gpui::Corners::all(radius.unwrap_or_default()));
         #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
         let radius: Option<Pixels> = None;
 
